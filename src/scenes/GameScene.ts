@@ -7,31 +7,24 @@ enum ResourceType {
 }
 
 // Define Tile Types
-const TILE_SIZE = 64; // Assuming 64x64 based on common asset packs
+const TILE_SIZE = 64;
 enum TileType {
     Grass = 0,
-    Water = 1,
-    // Rock = 2 // Add more later
+    // Water = 1, // Remove Water
 }
 
 // --- Game Data Definitions ---
 
 // Resources
 interface ResourceConfig {
-    key: string; // Internal key, e.g., 'iron'
+    key: string;
     displayName: string;
-    textureKey: string; // Key used in preload/add.image, e.g., 'node1'
+    textureKey: string;
     tier: number;
 }
-
 const Resources: ResourceConfig[] = [
-    { key: 'res1', displayName: 'Iron Ore', textureKey: 'node1', tier: 1 },
-    { key: 'res2', displayName: 'Copper Ore', textureKey: 'node2', tier: 1 },
-    { key: 'res3', displayName: 'Coal', textureKey: 'node3', tier: 2 },
-    { key: 'res4', displayName: 'Stone', textureKey: 'node4', tier: 2 },
-    { key: 'res5', displayName: 'Sulfur', textureKey: 'node5', tier: 3 },
-    // ... Add entries for nodes 6-15 ...
-    { key: 'res15', displayName: 'Resource 15', textureKey: 'node15', tier: 8 }, // Example placeholder
+    { key: 'res1', displayName: 'Generic Node', textureKey: 'node1', tier: 1 },
+    // Only define one type for now, using node1 texture
 ];
 
 // Belts
@@ -55,13 +48,15 @@ const Belts: BeltConfig[] = [
 export class GameScene extends Phaser.Scene {
     private cursors!: Phaser.Types.Input.Keyboard.CursorKeys; // Standard cursor keys (includes WASD)
     private cameraSpeed = 500; // Pixels per second
-    private worldSize = { width: 3000, height: 3000 }; // Define the size of the game world
+    private worldSize = { width: 3200, height: 3200 }; // Adjusted to be multiple of TILE_SIZE (64*50)
     private gridSize = TILE_SIZE; // Set gridSize to match TILE_SIZE
     private isPaused = false; // Pause state flag
     private pauseMenuGroup!: Phaser.GameObjects.Group; // Group for pause menu elements
     private tilemap!: Phaser.Tilemaps.Tilemap; // Reference to the tilemap
     private terrainLayer!: Phaser.Tilemaps.TilemapLayer; // Reference to the terrain layer
     private mapData: TileType[][] = []; // 2D array for map data
+    private selectedBuildItem: string | null = null;
+    private buildPreviewSprite: Phaser.GameObjects.Image | null = null; // Sprite attached to cursor
 
     // Zoom properties
     private minZoom = 0.5;
@@ -90,25 +85,20 @@ export class GameScene extends Phaser.Scene {
         // --- Load Assets --- 
         // Tiles
         this.load.image('grass', 'assets/grass.png');
-        this.load.image('water', 'assets/water.png');
+        // this.load.image('water', 'assets/water.png'); // Remove Water loading
 
-        // Nodes (Loading all 15)
-        for (let i = 1; i <= 15; i++) {
-            this.load.image(`node${i}`, `assets/node${i}.png`);
-        }
+        // Nodes (Loading only node1 for now)
+        this.load.image('node1', `assets/node1.png`);
+        // Remove loop for nodes 2-15
 
-        // Belts (Loading all 5)
+        // Belts (Keep loading 1-5)
         for (let i = 1; i <= 5; i++) {
             this.load.image(`belt${i}`, `assets/belt${i}.png`);
         }
 
         // Buildings
-        this.load.image('basicMiner', 'assets/floor_chest.png'); // Keeping placeholder
-        this.load.image('hub', 'assets/floor_campfire.png'); // Keeping placeholder
-
-        // --- REMOVE Old Node Placeholders ---
-        // this.load.image('ironNode', ...) 
-        // this.load.image('copperNode', ...)
+        this.load.image('buildMiner', 'assets/miner.png');
+        this.load.image('hub', 'assets/dragon.png'); // Use dragon.png for Hub
     }
 
     create() {
@@ -121,7 +111,33 @@ export class GameScene extends Phaser.Scene {
 
         // Listen for pause request from UI
         uiScene?.events.on('togglePauseRequest', () => {
+            console.log('GameScene received togglePauseRequest');
             this.togglePauseMenu();
+        });
+        // Listen for build item selection from UI
+        uiScene?.events.on('selectBuildItem', (itemKey: string) => {
+            console.log('GameScene received selectBuildItem:', itemKey);
+
+            // Destroy previous preview if any
+            if (this.buildPreviewSprite) {
+                this.buildPreviewSprite.destroy();
+                this.buildPreviewSprite = null;
+            }
+
+            // Toggle selection
+            if (this.selectedBuildItem === itemKey) {
+                this.selectedBuildItem = null;
+                console.log('GameScene: Deselected item.');
+                this.input.setDefaultCursor('default'); // Show default cursor
+            } else {
+                this.selectedBuildItem = itemKey;
+                console.log(`GameScene: Selected item ${this.selectedBuildItem}`);
+                // Create preview sprite
+                this.buildPreviewSprite = this.add.image(0, 0, this.selectedBuildItem);
+                this.buildPreviewSprite.setAlpha(0.6); // Make it semi-transparent
+                this.buildPreviewSprite.setDepth(50); // Ensure visible
+                this.input.setDefaultCursor('none'); // Hide default cursor
+            }
         });
 
         // --- World Setup ---
@@ -130,24 +146,27 @@ export class GameScene extends Phaser.Scene {
         // Set the boundaries for the camera
         this.cameras.main.setBounds(0, 0, this.worldSize.width, this.worldSize.height);
 
-        // --- Generate and Create Tilemap --- 
+        // --- Generate and Create Tilemap (Grass Only) --- 
         this.generateMapData();
         this.tilemap = this.make.tilemap({ data: this.mapData, tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
-        const tilesetGrass = this.tilemap.addTilesetImage('grass', 'grass'); // Use loaded image key 'grass'
-        const tilesetWater = this.tilemap.addTilesetImage('water', 'water'); // Use loaded image key 'water'
+        const tilesetGrass = this.tilemap.addTilesetImage('grass', 'grass');
+        // const tilesetWater = ... Remove water tileset
 
-        if (!tilesetGrass || !tilesetWater) {
-            console.error('Failed to load tile textures!');
+        if (!tilesetGrass /* || !tilesetWater */) { // Remove water check
+            console.error('Failed to load grass tile texture!'); // Update error message
             return;
         }
 
-        const layer = this.tilemap.createLayer(0, [tilesetGrass, tilesetWater], 0, 0);
+        const layer = this.tilemap.createLayer(0, [tilesetGrass /*, tilesetWater*/], 0, 0); // Only use grass tileset
         if (!layer) {
              console.error('Failed to create terrain layer!');
-             return; // Stop creation if layer failed
+             return;
         }
-        this.terrainLayer = layer; // Assign only if valid
-        this.terrainLayer.setDepth(-1); // Ensure background is behind everything
+        this.terrainLayer = layer;
+        this.terrainLayer.setDepth(-1);
+
+        // Prevent default right-click context menu on the game canvas
+        this.input.manager.contextMenu.disable = true;
 
         // --- Input Setup ---
         // Enable cursor keys (includes WASD mapping)
@@ -158,27 +177,56 @@ export class GameScene extends Phaser.Scene {
         // Mouse Input Listeners
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (this.isPaused) return;
+
             if (pointer.leftButtonDown()) {
-                // Calculate grid cell coordinates from world coordinates
-                const worldX = pointer.worldX;
-                const worldY = pointer.worldY;
-                const gridX = Math.floor(worldX / this.gridSize);
-                const gridY = Math.floor(worldY / this.gridSize);
+                if (this.selectedBuildItem) {
+                    // Calculate grid position
+                    const worldX = pointer.worldX;
+                    const worldY = pointer.worldY;
+                    const gridX = Math.floor(worldX / this.gridSize);
+                    const gridY = Math.floor(worldY / this.gridSize);
+                    const snappedX = gridX * this.gridSize + this.gridSize / 2;
+                    const snappedY = gridY * this.gridSize + this.gridSize / 2;
 
-                // Calculate the snapped position (center of the grid cell)
-                const snappedX = gridX * this.gridSize + this.gridSize / 2;
-                const snappedY = gridY * this.gridSize + this.gridSize / 2;
+                    // --- Placement Logic ---
+                    // Check if the selected item is the buildable miner
+                    if (this.selectedBuildItem === 'buildMiner') {
+                        // Placement validation (No longer need water check)
+                        if (/* this.mapData[gridY]?.[gridX] !== TileType.Water && */ true /* && !isCellOccupied(gridX, gridY) */) {
+                            console.log(`Placing ${this.selectedBuildItem} at grid (${gridX}, ${gridY})`);
+                            this.add.image(snappedX, snappedY, this.selectedBuildItem); // Use the selected item key
+                            // TODO: Add placed miner to a list/manager
+                            // TODO: Check adjacency to resource node
+                            this.selectedBuildItem = null; // Clear selection after placing
+                            console.log('Cleared build selection.');
+                        } else {
+                            console.log('Cannot place miner here (occupied?).'); // Update log message
+                        }
+                    } else {
+                        console.log(`Placement logic for ${this.selectedBuildItem} not implemented yet.`);
+                    }
+                    // --- End Placement Logic ---
 
-                console.log(`Left mouse button clicked at world (${worldX.toFixed(0)}, ${worldY.toFixed(0)}) -> grid (${gridX}, ${gridY}) -> placing at (${snappedX}, ${snappedY})`);
+                } else {
+                    // If nothing is selected, maybe handle object selection/interaction?
+                    console.log('Left click with nothing selected.');
+                }
 
-                console.log(`Placing basic miner...`);
-                this.add.image(snappedX, snappedY, 'basicMiner'); // Use loaded image key 'basicMiner'
             } else if (pointer.middleButtonDown()) {
                 console.log('Middle mouse button clicked at:', pointer.worldX, pointer.worldY);
                 // Later: Potentially rotate selected item? (View rotation is less common in 2D top-down)
             } else if (pointer.rightButtonDown()) {
-                console.log('Right mouse button clicked at:', pointer.worldX, pointer.worldY);
-                 // Later: Cancel action or open context menu
+                if (this.selectedBuildItem) {
+                    console.log('Cancelled build selection.');
+                    this.selectedBuildItem = null;
+                    if (this.buildPreviewSprite) { // Destroy preview on cancel
+                        this.buildPreviewSprite.destroy();
+                        this.buildPreviewSprite = null;
+                    }
+                    this.input.setDefaultCursor('default'); // Show default cursor
+                } else {
+                    console.log('Right mouse button clicked at:', pointer.worldX, pointer.worldY);
+                }
             }
         });
 
@@ -200,23 +248,29 @@ export class GameScene extends Phaser.Scene {
         // --- Initial Camera Position ---
         this.cameras.main.centerOn(this.worldSize.width / 2, this.worldSize.height / 2);
 
-        // --- Spawn Initial Resources (Check terrain) ---
-        this.spawnResourceNodes();
-
-        // --- Place Central Hub (Check terrain) ---
+        // --- Place Central Hub --- 
         const centerGridX = Math.floor((this.worldSize.width / 2) / this.gridSize);
         const centerGridY = Math.floor((this.worldSize.height / 2) / this.gridSize);
-        if (this.mapData[centerGridY]?.[centerGridX] !== TileType.Water) {
-            const hubX = centerGridX * this.gridSize + this.gridSize / 2; // Center in the cell
-            const hubY = centerGridY * this.gridSize + this.gridSize / 2;
-            this.add.image(hubX, hubY, 'hub'); // Use loaded image key 'hub'
-            console.log(`Placed Hub at grid (${centerGridX}, ${centerGridY})`);
-        } else {
-            console.warn(`Could not place Hub at (${centerGridX}, ${centerGridY}) - location is water.`);
-        }
+        // No water check needed
+        const hubX = centerGridX * this.gridSize + this.gridSize / 2;
+        const hubY = centerGridY * this.gridSize + this.gridSize / 2;
+        this.add.image(hubX, hubY, 'hub'); // Uses 'hub' key which now loads dragon.png
+        console.log(`Placed Hub at grid (${centerGridX}, ${centerGridY})`);
+
+        // --- Spawn Initial Resources --- 
+        this.spawnResourceNodes();
 
         // --- Create Pause Menu (Initially Hidden) ---
         this.createPauseMenu();
+
+        // Prevent browser right-click menu on game canvas
+        /* // Temporarily disable this check
+        if (this.game.canvas) {
+            this.game.canvas.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+            });
+        }
+        */
     }
 
     togglePauseMenu() {
@@ -316,75 +370,62 @@ export class GameScene extends Phaser.Scene {
         for (let y = 0; y < mapHeightInTiles; y++) {
             const row: TileType[] = [];
             for (let x = 0; x < mapWidthInTiles; x++) {
-                // --- Simplified Logic: Small chance for water ---
-                let tile = TileType.Grass;
-                if (Math.random() < 0.03) { // ~3% chance for any tile to be water
-                     tile = TileType.Water;
-                }
-                // --- End Simplified Logic ---
-
-                row.push(tile);
+                row.push(TileType.Grass); // Always push Grass
             }
             this.mapData.push(row);
-            // --- DEBUG LOG: Print first few rows ---
-            if (y < 5) {
-                console.log(`Map Row ${y}:`, row.slice(0, 10).join(',')); // Print first 10 tiles of first 5 rows
-            }
-            // --- END DEBUG LOG ---
+            // Remove debug log if desired
         }
-        console.log(`Generated map data ${mapWidthInTiles}x${mapHeightInTiles}`);
+        console.log(`Generated map data ${mapWidthInTiles}x${mapHeightInTiles} (All Grass)`);
     }
 
     spawnResourceNodes() {
         console.log('Spawning resource nodes...');
         const occupiedCells = new Set<string>();
+        const numNodesToSpawn = 30; // Total number of nodes (using node1 texture)
 
         // Reserve center cell for Hub
         const centerGridX = Math.floor((this.worldSize.width / 2) / this.gridSize);
         const centerGridY = Math.floor((this.worldSize.height / 2) / this.gridSize);
-        if (this.mapData[centerGridY]?.[centerGridX] !== TileType.Water) {
-             occupiedCells.add(`${centerGridX},${centerGridY}`);
-        }
-        // Add adjacent cells if Hub is larger than 1x1 grid conceptually
-        // occupiedCells.add(`${centerGridX+1},${centerGridY}`);
-        // occupiedCells.add(`${centerGridX},${centerGridY+1}`);
-        // occupiedCells.add(`${centerGridX+1},${centerGridY+1}`);
+        occupiedCells.add(`${centerGridX},${centerGridY}`);
 
-        // Define which resource tiers to spawn initially
-        const tiersToSpawn = [1, 2]; // Only spawn Tier 1 and Tier 2 nodes initially
-        const nodesPerTier = 15; // Example: Aim for 15 nodes per tier
+        let placed = 0;
+        let attempts = 0;
+        const maxAttempts = numNodesToSpawn * 5;
+        const resource = Resources[0]; // Get the only defined resource config
 
-        Resources.forEach(resource => {
-            if (tiersToSpawn.includes(resource.tier)) {
-                let placed = 0;
-                let attempts = 0;
-                const maxAttempts = nodesPerTier * 5; 
+        while (placed < numNodesToSpawn && attempts < maxAttempts) {
+            attempts++;
+            const randGridX = Phaser.Math.Between(0, (this.worldSize.width / this.gridSize) - 1);
+            const randGridY = Phaser.Math.Between(0, (this.worldSize.height / this.gridSize) - 1);
+            const cellKey = `${randGridX},${randGridY}`;
 
-                while (placed < nodesPerTier && attempts < maxAttempts) {
-                    attempts++;
-                    const randGridX = Phaser.Math.Between(0, (this.worldSize.width / this.gridSize) - 1);
-                    const randGridY = Phaser.Math.Between(0, (this.worldSize.height / this.gridSize) - 1);
-                    const cellKey = `${randGridX},${randGridY}`;
-
-                    if (!occupiedCells.has(cellKey) && this.mapData[randGridY]?.[randGridX] !== TileType.Water) {
-                        occupiedCells.add(cellKey);
-                        const nodeX = randGridX * this.gridSize + this.gridSize / 2;
-                        const nodeY = randGridY * this.gridSize + this.gridSize / 2;
-                        this.add.image(nodeX, nodeY, resource.textureKey); // Use textureKey from Resource config
-                        // Later: Store node data { type: resource.key, amount: defaultAmount, x, y }
-                        placed++;
-                    }
-                }
-                if (placed < nodesPerTier) {
-                    console.warn(`Could only place ${placed}/${nodesPerTier} ${resource.displayName} nodes.`);
-                }
+            // Check if cell is valid (not occupied, no water check needed)
+            if (!occupiedCells.has(cellKey)) {
+                occupiedCells.add(cellKey);
+                const nodeX = randGridX * this.gridSize + this.gridSize / 2;
+                const nodeY = randGridY * this.gridSize + this.gridSize / 2;
+                this.add.image(nodeX, nodeY, resource.textureKey); // Always use node1 texture key
+                placed++;
             }
-        });
-
+        }
+        if (placed < numNodesToSpawn) {
+            console.warn(`Could only place ${placed}/${numNodesToSpawn} nodes.`);
+        }
         console.log('Finished spawning nodes.');
     }
 
     update(time: number, delta: number) {
+        // --- Update Build Preview Position --- 
+        if (this.buildPreviewSprite && !this.isPaused) {
+            const pointer = this.input.activePointer;
+            const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+            const gridX = Math.floor(worldPoint.x / this.gridSize);
+            const gridY = Math.floor(worldPoint.y / this.gridSize);
+            const snappedX = gridX * this.gridSize + this.gridSize / 2;
+            const snappedY = gridY * this.gridSize + this.gridSize / 2;
+            this.buildPreviewSprite.setPosition(snappedX, snappedY);
+        }
+
         // --- Camera Movement (Only when not paused) ---
         if (!this.isPaused) { // Check if paused
             const dt = delta / 1000;

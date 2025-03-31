@@ -20,7 +20,6 @@ export class UIScene extends Phaser.Scene {
 
         const screenWidth = this.cameras.main.width;
         const screenHeight = this.cameras.main.height;
-        const gameScene = this.scene.get('GameScene'); // Get reference to GameScene
         const panelAlpha = 0.6; // Transparency for panels
         const panelColor = 0x000000; // Black background panels
 
@@ -83,8 +82,8 @@ export class UIScene extends Phaser.Scene {
         .setScrollFactor(0)
         .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => {
-            console.log('UI: Menu button clicked, emitting togglePauseRequest');
-            gameScene?.events.emit('togglePauseRequest'); // Emit event to GameScene
+            console.log('UIScene: Menu button clicked! Emitting togglePauseRequest.');
+            this.events.emit('togglePauseRequest');
         })
         .setDepth(200);
 
@@ -98,21 +97,23 @@ export class UIScene extends Phaser.Scene {
             .setDepth(90);
 
         const buildMenuStyle = { fontFamily: 'Arial', fontSize: '20px', color: '#aaffaa'};
-        this.add.text(10, screenHeight - 30, 'Build Menu Placeholder', buildMenuStyle)
+        this.add.text(10, screenHeight - 30, 'Build Menu:', buildMenuStyle)
             .setScrollFactor(0)
-            .setDepth(91); // Above its panel
+            .setDepth(91);
 
-        // --- Listen for GameScene Events ---
-        if (gameScene) {
-            // Listen for Resource Updates
-            gameScene.events.on('updateResource', (resource: string, amount: number) => {
-                this.updateResourceDisplay(resource, amount);
+        // Example Build Button: Basic Miner
+        const minerButtonStyle = { fontFamily: 'Arial', fontSize: '18px', color: '#ffffff', backgroundColor: '#444444', padding: {left: 5, right: 5}};
+        const minerButtonHoverStyle = {...minerButtonStyle, backgroundColor: '#666666'};
+        const buildMinerButton = this.add.text(130, screenHeight - 30, '[Miner]', minerButtonStyle)
+            .setScrollFactor(0)
+            .setDepth(91)
+            .setInteractive({ useHandCursor: true })
+            .on('pointerover', () => buildMinerButton.setStyle(minerButtonHoverStyle))
+            .on('pointerout', () => buildMinerButton.setStyle(minerButtonStyle))
+            .on('pointerdown', () => {
+                console.log('UIScene: [Miner] button clicked! Emitting selectBuildItem.');
+                this.events.emit('selectBuildItem', 'buildMiner');
             });
-            // Listen for Coordinate Updates
-            gameScene.events.on('cameraCoordsUpdate', (coords: {x: number, y: number}) => {
-                this.updateCoords(coords.x, coords.y);
-            });
-        }
     }
 
     // Method to update the coordinates display
